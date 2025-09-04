@@ -1,0 +1,14 @@
+{
+  "java.configuration.updateBuildConfiguration": "automatic",
+  "java.project.sourcePaths": [
+    "src/main/java",
+    "src/main/kotlin",
+    "src/main/resources",
+    "src/test/java",
+    "src/test/kotlin"
+  ],
+  "java.import.gradle.enabled": true,
+  "java.import.gradle.wrapper.enabled": true,
+  "java.import.gradle.version": "8.10.2",
+  "java.configuration.enableAnnotationProcessing": true
+}
