@@ -7,10 +7,11 @@ services:
     ports:
       - "3306:3306"
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: demo
-      MYSQL_USER: demo
-      MYSQL_PASSWORD: demo
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      TZ: ${TZ}
     volumes:
       - mariadb_data:/var/lib/mysql
     healthcheck:
@@ -28,11 +29,12 @@ services:
       - influxdb_data:/var/lib/influxdb2
     environment:
       - DOCKER_INFLUXDB_INIT_MODE=setup
-      - DOCKER_INFLUXDB_INIT_USERNAME=my-user
-      - DOCKER_INFLUXDB_INIT_PASSWORD=my-password
-      - DOCKER_INFLUXDB_INIT_ORG=my-org
-      - DOCKER_INFLUXDB_INIT_BUCKET=my-bucket
-      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=my-super-secret-token
+      - DOCKER_INFLUXDB_INIT_USERNAME=${INFLUXDB_USERNAME}
+      - DOCKER_INFLUXDB_INIT_PASSWORD=${INFLUXDB_PASSWORD}
+      - DOCKER_INFLUXDB_INIT_ORG=${INFLUXDB_ORG}
+      - DOCKER_INFLUXDB_INIT_BUCKET=${INFLUXDB_BUCKET}
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUXDB_TOKEN}
+      - TZ=${TZ}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
       interval: 10s
@@ -50,14 +52,16 @@ services:
       influxdb:
         condition: service_healthy
     environment:
-      SPRING_DATASOURCE_URL: jdbc:mariadb://mariadb:3306/demo
-      SPRING_DATASOURCE_USERNAME: demo
-      SPRING_DATASOURCE_PASSWORD: demo
-      SPRING_JPA_HIBERNATE_DDL_AUTO: update
-      INFLUX_URL: http://influxdb:8086   # ✅ localhost 대신 서비스명
-      INFLUX_TOKEN: my-super-secret-token
-      INFLUX_ORG: my-org
-      INFLUX_BUCKET: my-bucket
+      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL}
+      SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD}
+      SPRING_JPA_HIBERNATE_DDL_AUTO: ${SPRING_JPA_HIBERNATE_DDL_AUTO}
+      INFLUX_URL: http://influxdb:8086
+      INFLUX_TOKEN: ${INFLUXDB_TOKEN}
+      INFLUX_ORG: ${INFLUXDB_ORG}
+      INFLUX_BUCKET: ${INFLUXDB_BUCKET}
+      KMA_AUTH_KEY: ${KMA_AUTH_KEY}   # ✅ 기상청 API KEY 전달
+      TZ: ${TZ}
 
 volumes:
   mariadb_data:

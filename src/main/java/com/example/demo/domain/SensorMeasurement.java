@@ -14,7 +14,7 @@ import java.time.Instant;
 @AllArgsConstructor
 public class SensorMeasurement {
 
-    @Column(tag = true)
+    @Column(tag = true, name = "sensor")
     private String sensorId;   // ✅ Long → String
 
     @Column

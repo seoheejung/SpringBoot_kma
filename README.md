@@ -1,24 +1,40 @@
 # 🚀 InfluxDB & Spring Boot 시계열 데이터 처리 프로젝트
 
 ## 1. 프로젝트 목표
-Spring Boot 3.x와 InfluxDB를 활용해 센서 데이터(예: 온도)를 시계열로 저장하고, REST API로 조회할 수 있는 서비스를 구현합니다.  
-Repository 계층은 **Kotlin**을 도입하여 Java + Kotlin 혼합 환경을 실험합니다.  
-개발 및 배포는 **Docker (Java 17 + Gradle 8.10)** 환경에서 진행합니다.
+- Spring Boot 3.x와 InfluxDB를 활용해 **실시간 기상 데이터(기온, 풍속, 풍향, 기압, 강수량)**를 저장하고 REST API로 조회할 수 있는 서비스를 구현합니다.   
+- Repository 계층은 Kotlin을 도입하여 Java + Kotlin 혼합 환경을 실험합니다.   
+- 데이터 소스는 **기상청 API(KMA 지상관측 시간자료)**를 사용하며, `@Scheduled` 기반으로 자동 수집합니다.   
+- 개발 및 배포는 Docker (Java 17 + Gradle 8.10) 환경에서 진행합니다.   
+- MariaDB는 센서 메타데이터 저장, InfluxDB는 센서 측정값 저장, Spring App은 KMA API를 통해 자동 적재 + REST API 제공 구조로 진행합니다.
 
 ---
 
 ## 2. 기술 스택
 - **Backend:** Spring Boot 3.3.x, Java 17, Kotlin
-- **Database:** InfluxDB 2.x
+- **Database:** InfluxDB 2.x (시계열 DB), MariaDB 10.9 (메타데이터)
 - **Build Tool:** Gradle 8.10
 - **Container:** Docker (멀티스테이지 빌드)
-- **Monitoring (선택):** Grafana, Spring Boot Actuator
+- **Data Source:** KMA 기상청 OpenAPI (지상관측)
+- **Monitoring (선택):** InfluxDB UI, Grafana, Spring Boot Actuator
 
 ---
 
-## 3. 개발 단계
+## 3. 시스템 아키텍처
+```
+┌───────┐           ┌────────┐            ┌─────────┐
+│     KMA API    │ ---> │    Spring App   │ ---> │        InfluxDB         │
+│  (실시간 기상)  │           │     (수집/저장)    │            │     (시계열 저장)      │
+└───────┘           └────┬───┘            └────┬────┘
+                                                              │                                             │
+                                                              ▼                                             ▼
+                                                   REST API 제공            Grafana / Data Explorer
 
-### 1단계: InfluxDB 설정 (Docker Compose)
+```
+---
+
+## 4. 개발 단계
+
+### 1단계: Docker Compose 설정 
 **`docker-compose.yml`**
 ```yaml
 version: "3.8"
@@ -30,10 +46,11 @@ services:
     ports:
       - "3306:3306"
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: demo
-      MYSQL_USER: demo
-      MYSQL_PASSWORD: demo
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      TZ: ${TZ}
     volumes:
       - mariadb_data:/var/lib/mysql
     healthcheck:
@@ -51,11 +68,12 @@ services:
       - influxdb_data:/var/lib/influxdb2
     environment:
       - DOCKER_INFLUXDB_INIT_MODE=setup
-      - DOCKER_INFLUXDB_INIT_USERNAME=my-user
-      - DOCKER_INFLUXDB_INIT_PASSWORD=my-password
-      - DOCKER_INFLUXDB_INIT_ORG=my-org
-      - DOCKER_INFLUXDB_INIT_BUCKET=my-bucket
-      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=my-super-secret-token
+      - DOCKER_INFLUXDB_INIT_USERNAME=${INFLUXDB_USERNAME}
+      - DOCKER_INFLUXDB_INIT_PASSWORD=${INFLUXDB_PASSWORD}
+      - DOCKER_INFLUXDB_INIT_ORG=${INFLUXDB_ORG}
+      - DOCKER_INFLUXDB_INIT_BUCKET=${INFLUXDB_BUCKET}
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUXDB_TOKEN}
+      - TZ=${TZ}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
       interval: 10s
@@ -73,31 +91,41 @@ services:
       influxdb:
         condition: service_healthy
     environment:
-      SPRING_DATASOURCE_URL: jdbc:mariadb://mariadb:3306/demo
-      SPRING_DATASOURCE_USERNAME: demo
-      SPRING_DATASOURCE_PASSWORD: demo
-      SPRING_JPA_HIBERNATE_DDL_AUTO: update
-      INFLUX_URL: http://influxdb:8086   # ✅ localhost 대신 서비스명
-      INFLUX_TOKEN: my-super-secret-token
-      INFLUX_ORG: my-org
-      INFLUX_BUCKET: my-bucket
+      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL}
+      SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD}
+      SPRING_JPA_HIBERNATE_DDL_AUTO: ${SPRING_JPA_HIBERNATE_DDL_AUTO}
+      INFLUX_URL: http://influxdb:8086
+      INFLUX_TOKEN: ${INFLUXDB_TOKEN}
+      INFLUX_ORG: ${INFLUXDB_ORG}
+      INFLUX_BUCKET: ${INFLUXDB_BUCKET}
+      KMA_AUTH_KEY: ${KMA_AUTH_KEY}   # ✅ 기상청 API KEY 전달
+      TZ: ${TZ}
 
 volumes:
   mariadb_data:
   influxdb_data:
 
 ```
-실행:
-```bash
-docker-compose up -d --build
-```
-
 📌 설명
 1. MariaDB: 애플리케이션의 RDBMS 저장소. Spring Data JPA와 연결해 메타데이터나 일반 데이터 관리
 2. InfluxDB: 시계열 데이터베이스. 센서 데이터 같은 시계열 정보를 빠르게 저장·조회 가능
 3. Spring App: Spring Boot 기반 애플리케이션. 위 두 DB와 연결되어 API 요청을 처리
 4. healthcheck: MariaDB와 InfluxDB가 완전히 기동된 후 Spring App이 실행되도록 보장
+5. TZ: 애플리케이션 서버의 시간대 지정 (KST 기준 동작 보장)
+6. 환경변수: .env 파일로 관리
 
+**실행 방법**
+```
+docker-compose --env-file .env up -d --build
+```
+**컨테이너 상태 확인**
+```
+docker ps
+docker logs -f spring_app
+docker logs -f influxdb_for_spring
+docker logs -f mariadb_for_spring
+```
 ---
 
 ### 2단계: Gradle 프로젝트 설정
@@ -128,15 +156,18 @@ repositories {
 
 dependencies {
     implementation "org.springframework.boot:spring-boot-starter-web"
+    implementation "org.springframework.boot:spring-boot-starter-data-jpa"   // ✅ JPA + jakarta.persistence
+    implementation "org.springframework.boot:spring-boot-starter-webflux"    // ✅ WebClient
+    implementation "org.mariadb.jdbc:mariadb-java-client"                    // ✅ MariaDB driver
 
-    // ✅ InfluxDB Java Client
+    // InfluxDB Client
     implementation "com.influxdb:influxdb-client-java:6.10.0"
 
     // Kotlin
     implementation "org.jetbrains.kotlin:kotlin-reflect"
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8"
 
-    // Lombok (Java DTO, Domain)
+    // Lombok
     compileOnly "org.projectlombok:lombok"
     annotationProcessor "org.projectlombok:lombok"
     testCompileOnly "org.projectlombok:lombok"
@@ -144,6 +175,7 @@ dependencies {
 
     testImplementation "org.springframework.boot:spring-boot-starter-test"
 }
+
 
 tasks.named("test") {
     useJUnitPlatform()
@@ -162,6 +194,9 @@ tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
 3. Kotlin 플러그인 추가 (Repository를 Kotlin으로 작성 가능)
 4. Lombok으로 Java 클래스 보일러플레이트 제거 (@Data, @Builder 등)
 5. InfluxDB 클라이언트 추가 (influxdb-client-java)
+6. Spring Data JPA 추가 (spring-boot-starter-data-jpa) → jakarta.persistence 기반 엔티티/레포지토리 지원
+7. Spring WebFlux 추가 (spring-boot-starter-webflux) → WebClient 활용, 기상청 API 비동기 호출 가능
+8. MariaDB JDBC 드라이버 추가 (mariadb-java-client) → MariaDB와 안정적으로 연동
 
 ---
 
@@ -169,18 +204,45 @@ tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
 
 **`application.properties`**
 ```properties
-# InfluxDB 연결 설정 (환경변수 우선)
+# InfluxDB 연결
 influx.url=${INFLUX_URL:http://localhost:8086}
 influx.token=${INFLUX_TOKEN:my-super-secret-token}
 influx.org=${INFLUX_ORG:my-org}
 influx.bucket=${INFLUX_BUCKET:my-bucket}
+
+# KMA API
+kma.base-url=https://apihub.kma.go.kr/api/typ01/url/kma_sfctm3.php
+kma.auth-key=${KMA_AUTH_KEY}
+kma.station=108
+
 ```
 
 📌 설명
-1. influx.url → InfluxDB 서버 주소 (로컬 실행 시 localhost, Docker Compose 실행 시 influxdb 서비스명 사용).
-2. influx.token → 인증용 토큰 (관리자 계정 생성 시 발급된 값).
-3. influx.org → InfluxDB 조직(Org) 이름.
-4. influx.bucket → 시계열 데이터를 저장할 버킷 이름.
+1. `influx.url` : InfluxDB 서버 주소
+    - 로컬 실행 시: http://localhost:8086
+    - Docker Compose 실행 시: http://influxdb:8086 (서비스명 사용)
+2. `influx.token` : InfluxDB 접속을 위한 인증 토큰
+    - 초기 설정 시 생성되는 Admin Token 사용
+    - 보안상 .env 또는 환경 변수로 관리하는 것이 권장됨
+3. `influx.org` : InfluxDB 내 조직(Organization) 이름
+    - 버킷(bucket)과 함께 데이터 저장/조회 시 필요
+4. `influx.bucket` : 시계열 데이터를 저장할 버킷 이름
+    - 데이터베이스(Database)와 유사한 개념
+5. `kma.base-url` : 기상청 API 기본 URL
+    - 현재 사용: kma_sfctm3.php → 시간 단위 지상관측 데이터 제공
+6. `kma.auth-key` : 기상청 OpenAPI 인증 키(API Key)
+    - 데이터포털에서 발급받아야 하며, 필수적으로 쿼리 파라미터에 포함되어야 함
+    - env로 관리
+7. `kma.station` : 관측소 지점 번호(STN 코드)
+    - 108은 서울 관측소
+    - 다른 지역의 코드를 넣으면 해당 지점의 데이터 수집 가능
+    - 119 수원 / 112 인천 / 143 강릉 / 156 대전
+    - 159 부산 / 189 제주 / 185 여수 / 146 울릉도
+
+🔹 동작 원리
+- Spring Boot는 환경 변수 > properties 파일 순서로 값을 읽음
+- 따라서 docker-compose.yml에서 .env 파일을 연결하면 환경 변수가 우선 적용됨
+- 별도 환경 변수를 지정하지 않으면 application.properties의 기본값이 적용됨
 
 👉 모든 값은 환경 변수 우선 적용 후, 지정되지 않으면 application.properties의 기본값 사용
 
@@ -189,17 +251,28 @@ influx.bucket=${INFLUX_BUCKET:my-bucket}
 ### 4단계: 프로젝트 구조
 ```
 src/main/java/com/example/demo/
+ ├── config/
+ │    └── InfluxDBConfig.java
  ├── controller/
- │    └── ApiController.java
+ │    └── MeasurementController.java       # REST API 엔드포인트
  ├── domain/
- │    └── SensorMeasurement.java
+ │    ├── Sensor.java 
+ │    └── SensorMeasurement.java           # 도메인 엔티티 (관측 데이터)
  ├── dto/
- │    ├── SensorMeasurementRequest.java
- │    └── SensorMeasurementResponse.java
+ │    ├── SensorMeasurementRequest.java    # 요청 DTO (예: 기간, 센서명)
+ │    └── SensorMeasurementResponse.java   # 응답 DTO (값 + 시각)
  ├── service/
- │    └── ApiService.java
+ │    ├── KmaService.java                  # ✅ KMA API 호출 + InfluxDB 적재
+ │    └── MeasurementService.java          # ✅ InfluxDB 조회 서비스
+ ├── repository/
+ │    ├── SensorRepository.java          # Java 기반 Repository 인터페이스
+ │    └── InfluxDBRepository.java          # Java 기반 Repository 인터페이스
+ ├── fixture/
+ │    └── ServerInitializationFixture.java     # 서버 실행 시 기본 데이터 삽입
+
 src/main/kotlin/com/example/demo/repository/
- └── SensorMeasurementRepository.kt
+ └── InfluxDBRepositoryImpl.kt             # Kotlin 구현체
+
 ```
 - **Java**: Entity, DTO, Controller, Service
 - **Kotlin**: Repository 인터페이스
@@ -252,7 +325,7 @@ ENTRYPOINT ["java","-jar","/app/app.jar"]
 
 ### 6단계: 실행 및 확인
 ```bash
-docker-compose up -d --build
+docker-compose --env-file .env up -d --build
 ```
 - **InfluxDB UI** → http://localhost:8086  
 - **Spring Boot API** → http://localhost:8080/api/measurements  
@@ -260,7 +333,7 @@ docker-compose up -d --build
 **[다시 빌드 & 실행]**
 ```bash
 docker-compose down -v
-docker-compose up -d --build
+docker-compose --env-file .env up -d --build
 ```
 
 **[로그]**
@@ -283,7 +356,30 @@ curl "http://localhost:8080/api/measurements/1?durationSec=600"
 
 ---
 
-## 4. 검색 최적화 (Tag 유지 전략)
+## 5. 데이터 처리 흐름
+1. 데이터 수집
+    - @Scheduled 스케줄러가 매 정시마다 기상청 API 호출
+    - 관측 지점(station=108)의 기상 데이터를 텍스트 포맷으로 수신
+2. 데이터 파싱
+    - 응답 라인 단위 파싱
+    - 주요 관측값 추출:
+          - TA (기온, ℃)
+          - WS (풍속, m/s)
+          - WD (풍향, 16방위)
+          - PA (현지기압, hPa)
+          - RN (강수량, mm)
+3. InfluxDB 적재
+    - Measurement: sensor_data
+    - Tags: sensor, station
+    - Field: value
+    - Time: 관측 시각(TM → UTC 변환)
+4. 데이터 조회
+    - Spring Boot REST API 엔드포인트 제공
+    - 특정 센서(temperature, wind_speed, pressure 등)에 대해 기간별 시계열 조회 가능
+
+---
+
+## 6. 최적화
 - InfluxDB에서 sensorId는 tag로 저장 → 고성능 필터링 가능
 - InfluxDB는 tag를 반드시 문자열(String) 로 저장하므로 내부 저장은 문자열 기반으로 처리
 - API 인터페이스는 여전히 Long 타입을 사용하여 개발자 경험을 유지
@@ -292,7 +388,7 @@ curl "http://localhost:8080/api/measurements/1?durationSec=600"
 📌 이 방식은 쿼리 성능을 최적화하면서도, 외부 API와 내부 데이터 모델의 불일치를 최소화할 수 있음
 
 ---
-## 5. 빌드 & 설정 팁
+## 7. 빌드 & 설정 팁
 `gradle.properties`
 ```
 kapt.include.compile.classpath=false
@@ -316,9 +412,84 @@ lombok.anyConstructor.addConstructorProperties = true
 
 ---
 
-## 6. 확장 아이디어
+## 8. 확장 아이디어
 - 기간별 조회 API (`start`, `end` 파라미터)
 - 평균/최대/최소값 집계 API
-- `@Scheduled` 더미 데이터 생성기
 - Spring Boot Actuator + Grafana 대시보드
 - CI/CD (GitHub Actions, Jenkins 등)
+
+---
+## 9. 추가 작업 내역
+### ✅ MariaDB 접속 및 확인
+- 컨테이너 실행 후 MariaDB에 직접 접속해 테이블 생성 여부 및 초기 Sensor 데이터 확인:
+```
+docker exec -it mariadb_for_spring mariadb -u demo -pdemo demo
+```
+- 테이블 조회:
+```
+SHOW TABLES;
+SELECT * FROM sensors;
+```
+👉 ServerInitializationFixture 에 의해 서버 기동 시 Sensor 엔티티(온도, 풍속, 풍향 등)가 자동 등록되는지 확인할 수 있음.
+
+### ✅ InfluxDB 데이터 확인
+- InfluxDB는 UTC 기준으로 저장됨.
+- Data Explorer 기본 범위(Past 1h)에서 결과가 안 보이면 Past 12h 또는 Past 24h로 확장해야 함.
+- Flux Script 직접 실행:
+```
+from(bucket: "my-bucket")
+  |> range(start: -24h)
+  |> filter(fn: (r) => r._measurement == "sensor_data")
+```
+👉 여기서 sensor=temperature, station=108 등의 태그로 필터링 가능.
+
+- 컨테이너 안에서 리눅스 쉘 사용 (추천)
+```
+docker exec -it influxdb_for_spring sh
+```
+- 위 명령으로 들어가면 # 프롬프트가 뜸 → 여기서 Influx CLI 실행 가능
+```
+influx bucket list --org demo_org --token my-super-secret-token
+
+influx query '
+  from(bucket: "demo_bucket")
+    |> range(start: -24h)
+    |> filter(fn: (r) => r._measurement == "sensor_data")
+' --org demo_org --token my-super-secret-token
+```
+PowerShell의 명령어 파싱 간섭을 피하고, 리눅스처럼 Influx CLI를 그대로 사용 가능.
+
+### ✅ 태그 키 일관성 문제
+- KmaService → 태그 이름 sensor
+- MeasurementService + SensorMeasurement → 태그 이름 sensorId
+
+👉 Flux 쿼리에서 불일치 발생 → 조회 결과가 비어 있음.   
+해결책: SensorMeasurement 클래스에서 태그 이름을 강제로 맞춤.
+```
+@Measurement(name = "sensor_data")
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class SensorMeasurement {
+
+    @Column(tag = true, name = "sensor")   // ✅ 태그 이름 통일
+    private String sensorId;
+
+    @Column
+    private Double value;
+
+    @Column(timestamp = true)
+    private Instant sensingDate;
+}
+```
+👉 이렇게 하면 KmaService와 MeasurementService 모두 sensor 태그를 사용하므로 조회/저장이 일관성 있게 작동함.
+
+### ✅ 서버 기동 시 하루치 데이터 초기 적재
+- 기본 센서 등록과 동시에, 서버가 시작될 때 오늘 00시 ~ 현재 시각 -1시간 구간의 데이터를 한 번 수집 및 저장.
+- 구현: ServerInitializationFixture 내부에서 fetchAndStoreInitialData() 메서드 추가.
+- 동작:
+  1. MariaDB에 Sensor 엔티티가 존재하지 않으면 기본값 등록
+  2. KMA API를 호출하여 하루치 데이터를 InfluxDB에 적재
+  3. 이후 KmaService의 @Scheduled가 매 시각 5분마다 최신 데이터 적재
+
+👉 이 방식으로 서버 재기동 후에도 당일 데이터가 빠짐없이 보존됨.

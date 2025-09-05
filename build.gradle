@@ -22,15 +22,18 @@ repositories {
 
 dependencies {
     implementation "org.springframework.boot:spring-boot-starter-web"
+    implementation "org.springframework.boot:spring-boot-starter-data-jpa"   // ✅ JPA + jakarta.persistence
+    implementation "org.springframework.boot:spring-boot-starter-webflux"    // ✅ WebClient
+    implementation "org.mariadb.jdbc:mariadb-java-client"                    // ✅ MariaDB driver
 
-    // ✅ InfluxDB Java Client
+    // InfluxDB Client
     implementation "com.influxdb:influxdb-client-java:6.10.0"
 
     // Kotlin
     implementation "org.jetbrains.kotlin:kotlin-reflect"
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8"
 
-    // Lombok (Java DTO, Domain)
+    // Lombok
     compileOnly "org.projectlombok:lombok"
     annotationProcessor "org.projectlombok:lombok"
     testCompileOnly "org.projectlombok:lombok"
@@ -38,6 +41,7 @@ dependencies {
 
     testImplementation "org.springframework.boot:spring-boot-starter-test"
 }
+
 
 tasks.named("test") {
     useJUnitPlatform()

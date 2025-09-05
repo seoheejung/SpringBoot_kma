@@ -5,5 +5,5 @@ import java.util.List;
 
 public interface InfluxDBRepository {
     void save(SensorMeasurement measurement);
-    List<SensorMeasurement> findBySensorIdWithin(Long sensorId, long durationSec);
+    List<SensorMeasurement> findBySensorIdWithin(String sensorName, long durationSec);
 }

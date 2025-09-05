@@ -19,15 +19,16 @@ class InfluxDBRepositoryImpl(
         writeApi.writeMeasurement(WritePrecision.MS, measurement)
     }
 
-    override fun findBySensorIdWithin(sensorId: Long, durationSec: Long): List<SensorMeasurement> {
+    override fun findBySensorIdWithin(sensorName: String, durationSec: Long): List<SensorMeasurement> {
         val flux = """
             from(bucket: "my-bucket")
-              |> range(start: -${durationSec}s)
-              |> filter(fn: (r) => r._measurement == "sensor_data")
-              |> filter(fn: (r) => r["sensorId"] == "${sensorId}")  // ✅ 문자열 비교
-              |> filter(fn: (r) => r._field == "value")             // ✅ 값 필드만
+            |> range(start: -${durationSec}s)
+            |> filter(fn: (r) => r._measurement == "sensor_data")
+            |> filter(fn: (r) => r["sensor"] == "$sensorName")   // ✅ 수정됨
+            |> filter(fn: (r) => r._field == "value")
         """.trimIndent()
 
         return queryApi.query(flux, SensorMeasurement::class.java)
     }
+
 }
