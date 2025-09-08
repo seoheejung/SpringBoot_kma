@@ -8,9 +8,7 @@ import com.influxdb.client.domain.WritePrecision
 import org.springframework.stereotype.Repository
 
 @Repository
-class InfluxDBRepositoryImpl(
-    influxDBClient: InfluxDBClient
-) : InfluxDBRepository {
+class InfluxDBRepositoryImpl( influxDBClient: InfluxDBClient) : InfluxDBRepository {
 
     private val writeApi: WriteApiBlocking = influxDBClient.writeApiBlocking
     private val queryApi: QueryApi = influxDBClient.queryApi
@@ -19,12 +17,13 @@ class InfluxDBRepositoryImpl(
         writeApi.writeMeasurement(WritePrecision.MS, measurement)
     }
 
-    override fun findBySensorIdWithin(sensorName: String, durationSec: Long): List<SensorMeasurement> {
+
+    override fun findBySensorIdWithin(bucket: String, sensorName: String, durationSec: Long): List<SensorMeasurement> {
         val flux = """
-            from(bucket: "my-bucket")
+            from(bucket: "$bucket")
             |> range(start: -${durationSec}s)
             |> filter(fn: (r) => r._measurement == "sensor_data")
-            |> filter(fn: (r) => r["sensor"] == "$sensorName")   // ✅ 수정됨
+            |> filter(fn: (r) => r["sensor"] == "$sensorName")
             |> filter(fn: (r) => r._field == "value")
         """.trimIndent()
 

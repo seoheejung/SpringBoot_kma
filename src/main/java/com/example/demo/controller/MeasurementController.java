@@ -1,5 +1,6 @@
 package com.example.demo.controller;
 
+import com.example.demo.dto.AdminResponse;
 import com.example.demo.dto.SensorMeasurementRequest;
 import com.example.demo.dto.SensorMeasurementResponse;
 import com.example.demo.service.MeasurementService;
@@ -19,22 +20,27 @@ public class MeasurementController {
      * ✅ 수동 저장 API
      * POST /api/measurements
      */
-    @PostMapping
-    public String saveMeasurement(@RequestBody SensorMeasurementRequest request) {
-        measurementService.saveMeasurement(request);
-        return "Measurement saved!";
-    }
-
+@PostMapping
+public AdminResponse<?> saveMeasurement(@RequestBody SensorMeasurementRequest request) throws Exception {
+    int status = measurementService.saveMeasurement(request);
+    return AdminResponse.builder()
+            .status(status) 
+            .build();
+}
     /**
      * ✅ 조회 API (sensorId 기반)
      * GET /api/measurements/{sensorId}?durationSec=3600
      */
     @GetMapping("/{sensorId}")
-    public List<SensorMeasurementResponse> getMeasurementsById(
+    public AdminResponse<List<SensorMeasurementResponse>> getMeasurementsById(
             @PathVariable Long sensorId,
             @RequestParam(defaultValue = "3600") long durationSec
     ) {
-        return measurementService.getMeasurements(sensorId, durationSec);
+        List<SensorMeasurementResponse> list = measurementService.getMeasurements(sensorId, durationSec);
+
+        return AdminResponse.<List<SensorMeasurementResponse>>builder()
+                .payload(list)
+                .build();
     }
 
     /**
@@ -42,10 +48,13 @@ public class MeasurementController {
      * GET /api/measurements/by-name/{sensorName}?durationSec=3600
      */
     @GetMapping("/by-name/{sensorName}")
-    public List<SensorMeasurementResponse> getMeasurementsByName(
+    public AdminResponse<List<SensorMeasurementResponse>> getMeasurementsByName(
             @PathVariable String sensorName,
             @RequestParam(defaultValue = "3600") long durationSec
     ) {
-        return measurementService.getMeasurementsByName(sensorName, durationSec);
+        List<SensorMeasurementResponse> list = measurementService.getMeasurementsByName(sensorName, durationSec);
+        return AdminResponse.<List<SensorMeasurementResponse>>builder()
+            .payload(list)
+            .build();
     }
 }

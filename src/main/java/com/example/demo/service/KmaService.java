@@ -42,7 +42,9 @@ public class KmaService {
     /**
      * 📌 원하는 시간 범위를 받아서 KMA API → InfluxDB 적재
      */
-    public void fetchAndStore(String tm1, String tm2) {
+    public int fetchAndStore(String tm1, String tm2) {
+        int savedCount = 0;
+
         String url = String.format("%s?stn=%s&tm1=%s&tm2=%s&authKey=%s",
                 baseUrl, station, tm1, tm2, authKey);
 
@@ -56,7 +58,7 @@ public class KmaService {
 
         if (response == null || response.isBlank()) {
             log.warn("⚠️ KMA API 응답이 비어있음");
-            return;
+            return savedCount;
         }
 
         WriteApiBlocking writeApi = influxDBClient.getWriteApiBlocking();
@@ -85,12 +87,14 @@ public class KmaService {
                         makePoint("temperature", stn, ta, time),
                         makePoint("rainfall", stn, rn, time)
                 ));
+                savedCount++;
                 log.info("✅ KMA 데이터 저장: time={} temp={}", time, ta);
-
             } catch (Exception e) {
                 log.error("❌ 데이터 파싱 오류: {}", line, e);
-            }
+            } 
         }
+
+        return savedCount;
     }
 
     private Point makePoint(String sensor, String station, double value, Instant time) {

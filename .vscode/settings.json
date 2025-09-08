@@ -10,5 +10,6 @@
   "java.import.gradle.enabled": true,
   "java.import.gradle.wrapper.enabled": true,
   "java.import.gradle.version": "8.10.2",
-  "java.configuration.enableAnnotationProcessing": true
+  "java.configuration.enableAnnotationProcessing": true,
+  "java.compile.nullAnalysis.mode": "automatic"
 }

@@ -20,6 +20,6 @@ public class SensorMeasurement {
     @Column
     private Double value;
 
-    @Column(timestamp = true)
+    @Column(name = "_time", timestamp = true) // ✅ 실제 데이터 시각
     private Instant sensingDate;
 }

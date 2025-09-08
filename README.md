@@ -208,7 +208,7 @@ tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
 influx.url=${INFLUX_URL:http://localhost:8086}
 influx.token=${INFLUX_TOKEN:my-super-secret-token}
 influx.org=${INFLUX_ORG:my-org}
-influx.bucket=${INFLUX_BUCKET:my-bucket}
+influx.bucket=${INFLUX_BUCKET:demo_bucket}
 
 # KMA API
 kma.base-url=https://apihub.kma.go.kr/api/typ01/url/kma_sfctm3.php
@@ -252,30 +252,41 @@ kma.station=108
 ```
 src/main/java/com/example/demo/
  ├── config/
- │    └── InfluxDBConfig.java
- ├── controller/
- │    └── MeasurementController.java       # REST API 엔드포인트
- ├── domain/
- │    ├── Sensor.java 
- │    └── SensorMeasurement.java           # 도메인 엔티티 (관측 데이터)
- ├── dto/
- │    ├── SensorMeasurementRequest.java    # 요청 DTO (예: 기간, 센서명)
- │    └── SensorMeasurementResponse.java   # 응답 DTO (값 + 시각)
- ├── service/
- │    ├── KmaService.java                  # ✅ KMA API 호출 + InfluxDB 적재
- │    └── MeasurementService.java          # ✅ InfluxDB 조회 서비스
- ├── repository/
- │    ├── SensorRepository.java          # Java 기반 Repository 인터페이스
- │    └── InfluxDBRepository.java          # Java 기반 Repository 인터페이스
+ │    └── InfluxDBConfig.java               # InfluxDB 연결 설정
+ ├── constants/
+ │    └── HttpStatusCodeContrants.java      # 상태 코드 상수 정의
+ ├── controller/                            # REST API 엔드포인트
+ │    ├── KmaController.java                # KMA 데이터 수집 API
+ │    └── MeasurementController.java        # 센서 데이터 저장/조회 API
+ ├── domain/                                # 도메인 엔티티 (관측 데이터)
+ │    ├── Sensor.java                       # 센서 엔티티
+ │    └── SensorMeasurement.java            # 센서 측정값 엔티티
+ ├── dto/                                   # 데이터 전송 객체
+ │    ├── AdminResponse.java                # 공통 응답 Wrapper
+ │    ├── SensorMeasurementRequest.java     # 요청 DTO (센서ID, 값)
+ │    └── SensorMeasurementResponse.java    # 응답 DTO (센서ID, 값, 시각)
  ├── fixture/
- │    └── ServerInitializationFixture.java     # 서버 실행 시 기본 데이터 삽입
+ │    └── ServerInitializationFixture.java  # 서버 실행 시 기본 데이터 삽입
+ ├── repository/                            # Repository 인터페이스
+ │    ├── SensorRepository.java             # JPA 기반 Sensor Repository
+ │    └── InfluxDBRepository.java           # InfluxDB 저장/조회 인터페이스
+ ├── service/
+ │    ├── KmaService.java                   # KMA API 호출 + InfluxDB 적재
+ │    └── MeasurementService.java           # 센서 데이터 저장/조회 서비스
+ ├── DemoApplication.java                   # Spring Boot 실행 클래스
 
 src/main/kotlin/com/example/demo/repository/
- └── InfluxDBRepositoryImpl.kt             # Kotlin 구현체
+ └── InfluxDBRepositoryImpl.kt              # InfluxDBRepository Kotlin 구현체
+
+resources/
+ └── application.properties                 # 환경설정 파일
+
 
 ```
-- **Java**: Entity, DTO, Controller, Service
-- **Kotlin**: Repository 인터페이스
+- **Java**: Controller, Service, Entity, DTO 등 핵심 비즈니스 로직
+- **Kotlin**: InfluxDBRepositoryImpl 구현 → Java + Kotlin 혼합 환경 실험
+- **AdminResponse**: 모든 API 응답을 status + payload 형식으로 통일
+- **fixture**: 서버 구동 시 기본 데이터 세팅
 
 ---
 
@@ -344,15 +355,36 @@ docker logs -f spring_app
 
 ### 7단계: API 테스트
 
-**[데이터 저장]**
+**1. 데이터 저장 (수동 저장 API)**
 ```bash
-curl -X POST http://localhost:8080/api/measurements      -H "Content-Type: application/json"      -d '{"sensorId": 1, "value": 23.5}'
+curl -X POST http://localhost:8080/api/measurements \
+  -H "Content-Type: application/json" \
+  -d '{"sensorId": 1, "value": 23.5}'
 ```
 
-**[데이터 조회]**
+**2. 데이터 조회 (sensorId 기반)**
 ```bash
-curl "http://localhost:8080/api/measurements/1?durationSec=600"
+curl "http://localhost:8080/api/measurements/1?durationSec=3600"
 ```
+
+**3. 데이터 조회 (sensorName 기반)**
+```bash
+curl "http://localhost:8080/api/measurements/by-name/temperature?durationSec=3600"
+```
+
+
+**4. KMA 데이터 수집 (기상청 API → InfluxDB 적재)**
+```bash
+curl -X POST "http://localhost:8080/api/kma/fetch?tm1=2025090100&tm2=2025090200"
+```
+  📌 파라미터 설명
+   - tm1, tm2: 조회 기간 (시작/종료 시각)
+   -  형식: yyyyMMddHH   
+        예) 2025090100 → 2025년 9월 1일 00시   
+        예) 2025090200 → 2025년 9월 2일 00시
+
+### 포스트맨
+[SpringBoot_InfluxDB](https://documenter.getpostman.com/view/20595515/2sB3Hks21J)
 
 ---
 
@@ -423,10 +455,14 @@ lombok.anyConstructor.addConstructorProperties = true
 ### ✅ MariaDB 접속 및 확인
 - 컨테이너 실행 후 MariaDB에 직접 접속해 테이블 생성 여부 및 초기 Sensor 데이터 확인:
 ```
-docker exec -it mariadb_for_spring mariadb -u demo -pdemo demo
+docker exec -it mariadb_for_spring sh
+mariadb -u demo -p
 ```
 - 테이블 조회:
 ```
+SHOW DATABASES;
+USE demo;
+
 SHOW TABLES;
 SELECT * FROM sensors;
 ```
@@ -436,28 +472,42 @@ SELECT * FROM sensors;
 - InfluxDB는 UTC 기준으로 저장됨.
 - Data Explorer 기본 범위(Past 1h)에서 결과가 안 보이면 Past 12h 또는 Past 24h로 확장해야 함.
 - Flux Script 직접 실행:
-```
-from(bucket: "my-bucket")
-  |> range(start: -24h)
-  |> filter(fn: (r) => r._measurement == "sensor_data")
-```
-👉 여기서 sensor=temperature, station=108 등의 태그로 필터링 가능.
-
-- 컨테이너 안에서 리눅스 쉘 사용 (추천)
-```
-docker exec -it influxdb_for_spring sh
-```
-- 위 명령으로 들어가면 # 프롬프트가 뜸 → 여기서 Influx CLI 실행 가능
-```
-influx bucket list --org demo_org --token my-super-secret-token
-
-influx query '
+  ```
   from(bucket: "demo_bucket")
     |> range(start: -24h)
     |> filter(fn: (r) => r._measurement == "sensor_data")
-' --org demo_org --token my-super-secret-token
-```
-PowerShell의 명령어 파싱 간섭을 피하고, 리눅스처럼 Influx CLI를 그대로 사용 가능.
+  ```
+  👉 여기서 sensor=temperature, station=108 등의 태그로 필터링 가능.
+- 📌 왜 from(bucket: "...")을 꼭 써야 하나?
+  - InfluxDBClientFactory.create(url, token, org, bucket)에서 설정한 bucket은 쓰기(Write API) 기본값으로만 사용됨.
+  ```
+  writeApi.writeMeasurement(WritePrecision.MS, measurement);
+  // 여기서는 Config에 지정한 bucket/org 자동 적용
+  ```
+  - 조회(Query API)는 Flux 스크립트를 서버로 그대로 보내기 때문에, 어떤 버킷에서 데이터를 읽을지는 Flux에서 직접 명시해야 함.
+  ```
+  from(bucket: "demo_bucket")  // ✅ 반드시 지정 필요
+  ```
+  - Write → Config 기본값 자동 적용
+  - Query → Flux 구문에서 명시적으로 bucket 지정해야 함
+
+- 📌 컨테이너 안에서 리눅스 쉘 사용 (추천)
+  ```
+  docker exec -it influxdb_for_spring sh
+  ```
+  - 위 명령으로 들어가면 # 프롬프트가 뜸 → 여기서 Influx CLI 실행 가능
+  ```
+  influx bucket list --org demo_org --token my-super-secret-token
+
+  influx query '
+    from(bucket: "demo_bucket")
+      |> range(start: -86400s)
+      |> filter(fn: (r) => r._measurement == "sensor_data")
+      |> filter(fn: (r) => r["sensor"] == "wind_speed")
+      |> filter(fn: (r) => r._field == "value")
+  ' --org demo_org --token my-super-secret-token
+  ```
+  👉 PowerShell에서는 따옴표 처리 때문에 명령어가 깨질 수 있으므로, 컨테이너 안 리눅스 쉘에서 실행하는 걸 추천.
 
 ### ✅ 태그 키 일관성 문제
 - KmaService → 태그 이름 sensor
@@ -478,7 +528,7 @@ public class SensorMeasurement {
     @Column
     private Double value;
 
-    @Column(timestamp = true)
+    @Column(name = "_time", timestamp = true) // ✅ 실제 데이터 시각
     private Instant sensingDate;
 }
 ```

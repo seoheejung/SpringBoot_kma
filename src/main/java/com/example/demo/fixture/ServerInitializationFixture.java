@@ -41,13 +41,15 @@ public class ServerInitializationFixture {
 
         log.info("✅ 기본 Sensor 데이터 초기화 완료");
 
-        // 📌 오늘 00시~현재-1시간까지 초기 데이터 적재
-        String tm1 = LocalDate.now().atStartOfDay()
+        // 📌 전날 00시 ~ 현재-1시간까지 초기 데이터 적재
+        String tm1 = LocalDate.now().minusDays(1).atStartOfDay()
                 .format(DateTimeFormatter.ofPattern("yyyyMMddHHmm"));
         String tm2 = LocalDateTime.now().minusHours(1)
                 .format(DateTimeFormatter.ofPattern("yyyyMMddHHmm"));
 
-        kmaService.fetchAndStore(tm1, tm2);
+        int saved = kmaService.fetchAndStore(tm1, tm2);
+        log.info("📊 초기 KMA 데이터 적재 완료: {}건 저장 ({} ~ {})", saved, tm1, tm2);
+
     }
 
     private Sensor createSensorIfNotExists(String name, String unit, String location) {
