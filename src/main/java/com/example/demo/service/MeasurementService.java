@@ -11,9 +11,13 @@ import org.springframework.stereotype.Service;
 import lombok.extern.slf4j.Slf4j;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import org.springframework.transaction.annotation.Transactional;
 import com.example.demo.constants.HttpStatusCodeContrants;
 import org.springframework.beans.factory.annotation.Value;
+import java.util.concurrent.CompletableFuture;
+
 
 @Slf4j
 @Service
@@ -84,4 +88,60 @@ public class MeasurementService {
                         ))
                         .toList();
         }
+
+        @Transactional(readOnly = true)
+        public List<SensorMeasurementResponse> getAllMeasurements() {
+                return influxDBRepository.findAll(bucket).stream()
+                        .map(m -> {
+                                Long sensorId = sensorRepository.findByName(m.getSensorId())
+                                        .map(Sensor::getId)
+                                        .orElse(null);
+                                return new SensorMeasurementResponse(
+                                        sensorId,
+                                        m.getValue(),
+                                        m.getSensingDate()
+                                );
+                        })
+                        .toList();
+        }
+
+        @Transactional(readOnly = true)
+        public List<SensorMeasurementResponse> getAllWithinMeasurements(long durationSec) {
+                return influxDBRepository.findAllWithin(bucket, durationSec).stream()
+                        .map(m -> {
+                                Long sensorId = sensorRepository.findByName(m.getSensorId())
+                                        .map(Sensor::getId)
+                                        .orElse(null);
+                                return new SensorMeasurementResponse(
+                                        sensorId,
+                                        m.getValue(),
+                                        m.getSensingDate()
+                                );
+                        })
+                        .toList();
+        }
+
+        @Transactional(readOnly = true)
+        public Map<String, List<SensorMeasurementResponse>> getAllMeasurementsGroupedBySensor(long durationSec) {
+                List<Sensor> sensors = sensorRepository.findAll();
+
+                // 각 센서별로 InfluxDB에서 최근 durationSec 동안의 데이터를 조회하여 Map으로 그룹핑
+                return sensors.stream()
+                        .collect(Collectors.toMap(
+                                Sensor::getName, // key → 센서 이름 (예: "temperature", "wind_speed")
+
+                                // value → 비동기적으로 InfluxDB 조회 후 Response 변환
+                                sensor -> CompletableFuture.supplyAsync(() ->
+                                        influxDBRepository.findBySensorIdWithin(bucket, sensor.getName(), durationSec).stream()
+                                                // InfluxDB에서 조회한 SensorMeasurement → SensorMeasurementResponse 변환
+                                                .map(m -> new SensorMeasurementResponse(
+                                                        sensor.getId(),
+                                                        m.getValue(),  
+                                                        m.getSensingDate()  
+                                                ))
+                                                .toList()
+                                ).join() // Future 결과를 기다려서 List<SensorMeasurementResponse> 반환
+                        ));
+        }
+
 }

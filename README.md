@@ -383,6 +383,21 @@ curl -X POST "http://localhost:8080/api/kma/fetch?tm1=2025090100&tm2=2025090200"
         예) 2025090100 → 2025년 9월 1일 00시   
         예) 2025090200 → 2025년 9월 2일 00시
 
+**5. 전체 데이터 조회 (⚠️ 성능 주의, 개발용)**
+```bash
+curl "http://localhost:8080/api/measurements/all"
+```
+
+**6. 전체 데이터 조회 (기간 제한)**
+```bash
+curl "http://localhost:8080/api/measurements/all/within?durationSec=86400"
+```
+
+**7. 전체 데이터 조회 (센서별 그룹핑)**
+```bash
+curl "http://localhost:8080/api/measurements/all/grouped?durationSec=86400"
+```
+
 ### 포스트맨
 [SpringBoot_InfluxDB](https://documenter.getpostman.com/view/20595515/2sB3Hks21J)
 
@@ -500,11 +515,12 @@ SELECT * FROM sensors;
   influx bucket list --org demo_org --token my-super-secret-token
 
   influx query '
-    from(bucket: "demo_bucket")
-      |> range(start: -86400s)
-      |> filter(fn: (r) => r._measurement == "sensor_data")
-      |> filter(fn: (r) => r["sensor"] == "wind_speed")
-      |> filter(fn: (r) => r._field == "value")
+  from(bucket: "demo_bucket")
+    |> range(start: 0)
+    |> filter(fn: (r) => r._measurement == "sensor_data")
+    |> filter(fn: (r) => r["sensor"] == "wind_speed")
+    |> filter(fn: (r) => r._field == "value")
+    |> timeShift(duration: 9h)  // ✅ UTC → KST (9시간 더하기)
   ' --org demo_org --token my-super-secret-token
   ```
   👉 PowerShell에서는 따옴표 처리 때문에 명령어가 깨질 수 있으므로, 컨테이너 안 리눅스 쉘에서 실행하는 걸 추천.

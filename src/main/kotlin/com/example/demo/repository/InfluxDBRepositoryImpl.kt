@@ -25,9 +25,35 @@ class InfluxDBRepositoryImpl( influxDBClient: InfluxDBClient) : InfluxDBReposito
             |> filter(fn: (r) => r._measurement == "sensor_data")
             |> filter(fn: (r) => r["sensor"] == "$sensorName")
             |> filter(fn: (r) => r._field == "value")
+            |> timeShift(duration: 9h)
         """.trimIndent()
 
         return queryApi.query(flux, SensorMeasurement::class.java)
     }
+
+    override fun findAll(bucket: String): List<SensorMeasurement> {
+        val flux = """
+            from(bucket: "$bucket")
+            |> range(start: 0) 
+            |> filter(fn: (r) => r._measurement == "sensor_data")
+            |> filter(fn: (r) => r._field == "value")
+            |> timeShift(duration: 9h)
+        """.trimIndent()
+
+        return queryApi.query(flux, SensorMeasurement::class.java)
+    }
+
+    override fun findAllWithin(bucket: String, durationSec: Long): List<SensorMeasurement> {
+        val flux = """
+            from(bucket: "$bucket")
+            |> range(start: -${durationSec}s)
+            |> filter(fn: (r) => r._measurement == "sensor_data")
+            |> filter(fn: (r) => r._field == "value")
+            |> timeShift(duration: 9h)
+        """.trimIndent()
+
+        return queryApi.query(flux, SensorMeasurement::class.java)
+    }
+
 
 }
