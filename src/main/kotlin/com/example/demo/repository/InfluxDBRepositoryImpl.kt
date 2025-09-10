@@ -6,6 +6,9 @@ import com.influxdb.client.QueryApi
 import com.influxdb.client.WriteApiBlocking
 import com.influxdb.client.domain.WritePrecision
 import org.springframework.stereotype.Repository
+import java.time.Instant
+import java.time.format.DateTimeFormatter
+
 
 @Repository
 class InfluxDBRepositoryImpl( influxDBClient: InfluxDBClient) : InfluxDBRepository {
@@ -43,17 +46,22 @@ class InfluxDBRepositoryImpl( influxDBClient: InfluxDBClient) : InfluxDBReposito
         return queryApi.query(flux, SensorMeasurement::class.java)
     }
 
-    override fun findAllWithin(bucket: String, durationSec: Long): List<SensorMeasurement> {
+    /**
+     * ✅ 기간별 조회 (start ~ end)
+     */
+    override fun findBySensorIdBetween(bucket: String, sensorName: String, start: Instant, end: Instant): List<SensorMeasurement> {
+        val startStr = DateTimeFormatter.ISO_INSTANT.format(start)
+        val endStr = DateTimeFormatter.ISO_INSTANT.format(end)
+
         val flux = """
             from(bucket: "$bucket")
-            |> range(start: -${durationSec}s)
+            |> range(start: $startStr, stop: $endStr)
             |> filter(fn: (r) => r._measurement == "sensor_data")
+            |> filter(fn: (r) => r["sensor"] == "$sensorName")
             |> filter(fn: (r) => r._field == "value")
             |> timeShift(duration: 9h)
         """.trimIndent()
 
         return queryApi.query(flux, SensorMeasurement::class.java)
     }
-
-
 }

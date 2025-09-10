@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.example.demo.constants.HttpStatusCodeContrants;
 import org.springframework.beans.factory.annotation.Value;
 import java.util.concurrent.CompletableFuture;
+import java.time.Instant;
 
 
 @Slf4j
@@ -106,23 +107,22 @@ public class MeasurementService {
         }
 
         @Transactional(readOnly = true)
-        public List<SensorMeasurementResponse> getAllWithinMeasurements(long durationSec) {
-                return influxDBRepository.findAllWithin(bucket, durationSec).stream()
-                        .map(m -> {
-                                Long sensorId = sensorRepository.findByName(m.getSensorId())
-                                        .map(Sensor::getId)
-                                        .orElse(null);
-                                return new SensorMeasurementResponse(
-                                        sensorId,
-                                        m.getValue(),
-                                        m.getSensingDate()
-                                );
-                        })
+        public List<SensorMeasurementResponse> getMeasurementsBetween(String sensorName, Instant start, Instant end) {
+                Long sensorId = sensorRepository.findByName(sensorName)
+                        .map(Sensor::getId)
+                        .orElseThrow(() -> new IllegalArgumentException("Sensor not found: name=" + sensorName));
+
+                return influxDBRepository.findBySensorIdBetween(bucket, sensorName, start, end).stream()
+                        .map(m -> new SensorMeasurementResponse(
+                                sensorId,
+                                m.getValue(),
+                                m.getSensingDate()
+                        ))
                         .toList();
         }
-
+        
         @Transactional(readOnly = true)
-        public Map<String, List<SensorMeasurementResponse>> getAllMeasurementsGroupedBySensor(long durationSec) {
+        public Map<String, List<SensorMeasurementResponse>> getMeasurementsGroupedBySensor(Instant start, Instant end) {
                 List<Sensor> sensors = sensorRepository.findAll();
 
                 // 각 센서별로 InfluxDB에서 최근 durationSec 동안의 데이터를 조회하여 Map으로 그룹핑
@@ -132,7 +132,7 @@ public class MeasurementService {
 
                                 // value → 비동기적으로 InfluxDB 조회 후 Response 변환
                                 sensor -> CompletableFuture.supplyAsync(() ->
-                                        influxDBRepository.findBySensorIdWithin(bucket, sensor.getName(), durationSec).stream()
+                                        influxDBRepository.findBySensorIdBetween(bucket, sensor.getName(), start, end).stream()
                                                 // InfluxDB에서 조회한 SensorMeasurement → SensorMeasurementResponse 변환
                                                 .map(m -> new SensorMeasurementResponse(
                                                         sensor.getId(),

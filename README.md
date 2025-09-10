@@ -20,14 +20,15 @@
 ---
 
 ## 3. 시스템 아키텍처
-```
-┌───────┐           ┌────────┐            ┌─────────┐
-│     KMA API    │ ---> │    Spring App   │ ---> │        InfluxDB         │
-│  (실시간 기상)  │           │     (수집/저장)    │            │     (시계열 저장)      │
-└───────┘           └────┬───┘            └────┬────┘
-                                                              │                                             │
-                                                              ▼                                             ▼
-                                                   REST API 제공            Grafana / Data Explorer
+```text
+┌─────────┐           ┌────────┐            ┌─────────┐
+│       KMA API          │ --->│    Spring App    │ ---> │         InfluxDB        │
+│      (실시간 기상)     │           │     (수집/저장)     │            │      (시계열 저장)     │
+└─────────┘           └────┬───┘            └────┬────┘
+                                                                     │                                            │
+                                                                      ▼                                            ▼
+                                                              REST API 제공       Grafana / Data Explorer
+
 
 ```
 ---
@@ -388,16 +389,15 @@ curl -X POST "http://localhost:8080/api/kma/fetch?tm1=2025090100&tm2=2025090200"
 curl "http://localhost:8080/api/measurements/all"
 ```
 
-**6. 전체 데이터 조회 (기간 제한)**
+**6. 기간 지정 데이터 조회**
 ```bash
-curl "http://localhost:8080/api/measurements/all/within?durationSec=86400"
+curl "http://localhost:8080/api/measurements/list?sensorName=temperature&start=2025-09-01T00:00:00&end=2025-09-08T23:59:59"
 ```
 
-**7. 전체 데이터 조회 (센서별 그룹핑)**
+**7. 기간 지정 데이터 조회 (센서별 그룹핑)**
 ```bash
-curl "http://localhost:8080/api/measurements/all/grouped?durationSec=86400"
+curl "http://localhost:8080/api/measurements/list/grouped?start=2025-09-01T00:00:00&end=2025-09-08T23:59:59"
 ```
-
 ### 포스트맨
 [SpringBoot_InfluxDB](https://documenter.getpostman.com/view/20595515/2sB3Hks21J)
 
@@ -458,15 +458,7 @@ lombok.anyConstructor.addConstructorProperties = true
 📌 이 설정들은 Kotlin + Java 혼합 프로젝트에서 Lombok 안정성 확보와 호환성 개선에 필수적
 
 ---
-
-## 8. 확장 아이디어
-- 기간별 조회 API (`start`, `end` 파라미터)
-- 평균/최대/최소값 집계 API
-- Spring Boot Actuator + Grafana 대시보드
-- CI/CD (GitHub Actions, Jenkins 등)
-
----
-## 9. 추가 작업 내역
+## 8. 추가 작업 내역
 ### ✅ MariaDB 접속 및 확인
 - 컨테이너 실행 후 MariaDB에 직접 접속해 테이블 생성 여부 및 초기 Sensor 데이터 확인:
 ```
@@ -551,11 +543,21 @@ public class SensorMeasurement {
 👉 이렇게 하면 KmaService와 MeasurementService 모두 sensor 태그를 사용하므로 조회/저장이 일관성 있게 작동함.
 
 ### ✅ 서버 기동 시 하루치 데이터 초기 적재
-- 기본 센서 등록과 동시에, 서버가 시작될 때 오늘 00시 ~ 현재 시각 -1시간 구간의 데이터를 한 번 수집 및 저장.
-- 구현: ServerInitializationFixture 내부에서 fetchAndStoreInitialData() 메서드 추가.
-- 동작:
+- 기본 센서 등록과 동시에, 서버가 시작될 때 `kma.init-days` 설정값(기본 31일) 전 00시 ~ 현재 정시까지 데이터를 한 번 수집 및 저장.
+- 구현: `ServerInitializationFixture` 내부에서 `fetchAndStoreInitialData()` 메서드 추가.
+- 중복 방지 플래그
+    - `KmaService`의 `@PostConstruct init()`에서 `initialized = true`로 세팅
+    - 첫 번째 스케줄 실행 시 `initialized == true`이면 스킵 후 `false`로 변경 → 초기 적재와 스케줄 적재가 겹쳐 중복 저장되는 문제 방지
+- 동작
   1. MariaDB에 Sensor 엔티티가 존재하지 않으면 기본값 등록
-  2. KMA API를 호출하여 하루치 데이터를 InfluxDB에 적재
-  3. 이후 KmaService의 @Scheduled가 매 시각 5분마다 최신 데이터 적재
+  2. KMA API 호출: `init-days` 전 00시 ~ 현재 정시까지의 데이터를 InfluxDB에 적재
+  3. 스케줄러 실행: `KmaService`의 `@Scheduled(cron = "0 10 * * * *")`가 매 시각 10분마다 최신 1시간 데이터를 적재
 
-👉 이 방식으로 서버 재기동 후에도 당일 데이터가 빠짐없이 보존됨.
+👉 이 방식으로 서버 재기동 후에도 과거 ~ 현재까지의 데이터가 보존되며, 스케줄러가 이어받아 최신 데이터 적재를 지속적으로 보장 및 서버 재기동 후에도 데이터 누락 없음 + 중복 적재 방지 두 가지가 모두 보장
+
+---
+
+## 9. 확장 아이디어
+- 평균/최대/최소값 집계 API
+- Spring Boot Actuator + Grafana 대시보드
+- CI/CD (GitHub Actions, Jenkins 등)

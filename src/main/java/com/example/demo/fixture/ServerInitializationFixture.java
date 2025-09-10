@@ -28,6 +28,9 @@ public class ServerInitializationFixture {
     private final SensorRepository sensorRepository;
     private final KmaService kmaService;
 
+    @Value("${kma.init-days:31}")
+    private int init_days;
+
     @PostConstruct
     @Transactional(rollbackOn = { Exception.class })
     public void initializationServer() throws Exception {
@@ -41,10 +44,10 @@ public class ServerInitializationFixture {
 
         log.info("✅ 기본 Sensor 데이터 초기화 완료");
 
-        // 📌 오늘 00시 ~ 현재-1시간까지 초기 데이터 적재
-        String tm1 = LocalDate.now().atStartOfDay()
+        // 📌 31일전  00시 ~ 현재 시간의 정시까지 초기 데이터 적재
+        String tm1 = LocalDate.now().minusDays(init_days).atStartOfDay()
                 .format(DateTimeFormatter.ofPattern("yyyyMMddHHmm"));
-        String tm2 = LocalDateTime.now().minusHours(1)
+        String tm2 = LocalDateTime.now().withMinute(0).withSecond(0).withNano(0)
                 .format(DateTimeFormatter.ofPattern("yyyyMMddHHmm"));
 
         int saved = kmaService.fetchAndStore(tm1, tm2);

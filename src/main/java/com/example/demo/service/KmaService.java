@@ -31,11 +31,23 @@ public class KmaService {
     @Value("${kma.station}")
     private String station;
 
+    private boolean initialized = false;
+
+    @PostConstruct public void init() { 
+        // 초기 적재 
+        initialized = true; 
+    }
+
     /**
      * 매 정시마다 실행 → 지난 1시간 데이터 수집 후 InfluxDB 적재
      */
-    @Scheduled(cron = "0 5 * * * *") 
+    @Scheduled(cron = "0 10 * * * *") 
     public void fetchAndStoreScheduled() {
+        if (initialized) {
+            initialized = false;
+            log.info("🚫 첫 스케줄은 초기 적재와 겹치므로 skip");
+            return;
+        }
         fetchAndStore(nowMinusOneHour(), nowTime());
     }
 
