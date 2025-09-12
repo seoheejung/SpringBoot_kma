@@ -5,7 +5,7 @@ services:
     image: mariadb:10.9
     container_name: mariadb_for_spring
     ports:
-      - "3306:3306"
+      - "3307:3306"
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE}
@@ -43,6 +43,7 @@ services:
 
   spring-app:
     build: .
+    image: springboot_kma
     container_name: spring_app
     ports:
       - "8080:8080"

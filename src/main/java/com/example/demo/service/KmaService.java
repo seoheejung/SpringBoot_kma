@@ -10,10 +10,13 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import jakarta.annotation.PostConstruct;
 
 import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
+
+import static com.example.demo.util.TimeUtils.*;
 
 @Service
 @RequiredArgsConstructor
@@ -128,11 +131,4 @@ public class KmaService {
         return ldt.atZone(ZoneId.of("Asia/Seoul")).toInstant();
     }
 
-    private String nowTime() {
-        return LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmm"));
-    }
-
-    private String nowMinusOneHour() {
-        return LocalDateTime.now().minusHours(1).format(DateTimeFormatter.ofPattern("yyyyMMddHHmm"));
-    }
 }
