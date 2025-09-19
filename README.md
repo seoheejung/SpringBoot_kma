@@ -384,8 +384,19 @@ docker-compose --env-file .env up -d --build
 
 **[다시 빌드 & 실행]**
 ```bash
-docker-compose down -v
+docker-compose down
 docker-compose --env-file .env up -d --build
+```
+
+**초기화가 필요할 때**
+```bash
+docker-compose down -v
+```
+
+**추가 확인 (볼륨 목록 보기)**
+```bash
+docker volume ls
+docker volume inspect mariadb_for_spring
 ```
 
 **[로그]**
@@ -637,3 +648,36 @@ public class SensorMeasurement {
 - CI/CD (GitHub Actions, Jenkins 등)
 - 단기예보
   - 기상청 단기예보 개황 API → Spring Boot → MariaDB 저장 → REST API로 공유
+
+---
+
+## 10. 비기능 요구사항 (NFR)
+1. 보안 (Security)
+- 환경 변수 기반 설정
+  - DB 계정/비밀번호, KMA API Key는 .env 파일 또는 Docker 환경 변수로 관리
+  - application.properties에는 기본값만 정의 → 민감정보 노출 방지
+- 입력값 검증
+  - API 파라미터(tm1, tm2, tmfc1, tmfc2)는 정규식 검증 (\d{10,12}) 적용
+  - 잘못된 입력 시 400 Bad Request 반환
+- SQL Injection 방어
+  - Spring Data JPA 파라미터 바인딩 사용 (:param) → 쿼리 문자열 직접 조합 금지
+- 로그 마스킹 처리
+  - 비밀번호, 토큰, 인증 키는 로그에 노출되지 않도록 별도 마스킹 로직 적용
+- 외부 API 호출 보안
+  - RestTemplate/WebClient 응답값 유효성 검증
+  - 예상치 못한 응답(JSON 파싱 오류, 필드 누락) 시 Graceful Fail 처리
+
+2. 안정성 (Reliability)
+- 중복 방지
+  - ForecastSummary 테이블 (tm_fc, stn_id)에 Unique Index 적용
+  - 중복 발생 시 Upsert(ON DUPLICATE KEY UPDATE) 처리
+- 스케줄러 안정화
+  - 서버 기동 시 초기 적재 수행 후 → 첫 번째 스케줄은 skip 처리
+  - 예외 발생 시 로깅 및 재시도 가능
+- 시간 일관성
+  - InfluxDB는 UTC 저장, API 응답은 Asia/Seoul 변환 → 전 구간 일관성 유지
+
+3. 방어적 코딩 (Defensive Coding)
+- Null 체크 및 기본값 처리
+- 예외 처리 강화
+- API 요청 파라미터 검증
