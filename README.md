@@ -21,12 +21,12 @@
 
 ## 3. 시스템 아키텍처
 ```text
-                   ┌────────────────────────┐
-                   │       KMA API Hub       │
-                   │ ─────────────────────── │
+                   ┌─────────────┐
+                   │              KMA API Hub          │
+                   │ ───────────── │
                    │ ① kma_sfctm3.php (실황) │
-                   │ ② fct_afs_ds.php (예보) │
-                   └─────────────┬──────────┘
+                   │ ② fct_afs_ds.php (예보)    │
+                   └─────┬───────┘
                                  ↓
                   ┌────────────────────────┐
                   │   Spring Boot App       │
@@ -57,6 +57,7 @@
      │ Grafana / Dashboard │               │ 외부 서비스 공유     │
      │ 시각화/모니터링       │               │ 대시보드/분석/연계   │
      └─────────────────────┘               └─────────────────────┘
+
 
 ```
 - 실황 (kma_sfctm3 → InfluxDB → Measurements API → Grafana)
@@ -140,12 +141,16 @@ volumes:
 
 ```
 📌 설명
-1. MariaDB: 애플리케이션의 RDBMS 저장소. Spring Data JPA와 연결해 메타데이터나 일반 데이터 관리
-2. InfluxDB: 시계열 데이터베이스. 센서 데이터 같은 시계열 정보를 빠르게 저장·조회 가능
-3. Spring App: Spring Boot 기반 애플리케이션. 위 두 DB와 연결되어 API 요청을 처리
-4. healthcheck: MariaDB와 InfluxDB가 완전히 기동된 후 Spring App이 실행되도록 보장
-5. TZ: 애플리케이션 서버의 시간대 지정 (KST 기준 동작 보장)
-6. 환경변수: .env 파일로 관리
+1. 역할 분리
+    - `mariadb`: 관계형 데이터 저장소 (메타데이터, 사용자 정보, API Key 등 관리)
+    - `influxdb`: 시계열 데이터 저장소 (기상청 API·센서 측정값 적재 및 조회)
+    - `spring-app`: 비즈니스 로직 처리, API 라우팅 및 DB 연동
+2. Healthcheck
+    - DB가 준비되지 않은 상태에서 Spring Boot가 먼저 실행되면 연결 실패 → 컨테이너 충돌 발생
+    - `healthcheck`를 통해 DB Ready 상태 확인 후 Spring App을 실행
+3. 환경변수 관리
+    - `.env` 파일에 민감정보(API Key, DB Password 등) 저장
+    - 코드/레포지토리에 노출 방지
 
 **실행 방법**
 ```
@@ -206,6 +211,12 @@ dependencies {
     testAnnotationProcessor "org.projectlombok:lombok"
 
     testImplementation "org.springframework.boot:spring-boot-starter-test"
+
+    implementation "org.springframework.boot:spring-boot-starter-security"
+    implementation "org.springframework.boot:spring-boot-starter-validation"
+    
+    // https://mvnrepository.com/artifact/com.bucket4j/bucket4j-core
+    implementation("com.bucket4j:bucket4j-core:8.10.1")
 }
 
 
@@ -220,15 +231,20 @@ tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
 }
 
 ```
-📌 주요 변경점
-1. Spring Boot `2.7.x` → `3.3.4`
-2. Java 11 → **Java 17 (Toolchain 적용)**
-3. Kotlin 플러그인 추가 (Repository를 Kotlin으로 작성 가능)
-4. Lombok으로 Java 클래스 보일러플레이트 제거 (@Data, @Builder 등)
-5. InfluxDB 클라이언트 추가 (influxdb-client-java)
-6. Spring Data JPA 추가 (spring-boot-starter-data-jpa) → jakarta.persistence 기반 엔티티/레포지토리 지원
-7. Spring WebFlux 추가 (spring-boot-starter-webflux) → WebClient 활용, 기상청 API 비동기 호출 가능
-8. MariaDB JDBC 드라이버 추가 (mariadb-java-client) → MariaDB와 안정적으로 연동
+📌 설정
+1. 언어 선택
+    - `Java 17` (Controller, Service, Entity 등 안정적인 비즈니스 로직 처리)
+    - Spring Boot `2.7.x` → `3.3.4`
+    - Kotlin (Repository 계층 일부 구현 → 코틀린 DSL과 Null Safety 활용 가능)
+    - 혼합 환경으로, 팀이 점진적으로 Kotlin 전환을 실험할 수 있음
+2. 의존성 주요 포인트
+    - `spring-boot-starter-security`: CSRF 방어 + API Key 인증 기반 구조 마련
+    - `bucket4j`: API Key 단위 Rate Limiting (DoS 방어 목적)
+    - `influxdb-client-java`: Flux 쿼리 기반 시계열 데이터 읽기/쓰기
+    - `spring-boot-starter-data-jpa`: 엔티티 관리 및 MariaDB 연동
+    -  `lombok`: Java 클래스 보일러플레이트 제거 (@Data, @Builder 등)
+    - `spring-boot-starter-webflux`: WebClient 활용, 기상청 API 비동기 호출 가능
+    - `mariadb-java-client`: MariaDB와 안정적으로 연동
 
 ---
 
@@ -247,6 +263,22 @@ kma.base-url=https://apihub.kma.go.kr/api/typ01/url/kma_sfctm3.php
 kma.fct-url=https://apihub.kma.go.kr/api/typ01/url/fct_afs_ds.php
 kma.auth-key=${KMA_AUTH_KEY}
 kma.station=108
+kma.init-days=31
+
+# HikariCP 커스텀 옵션
+spring.datasource.hikari.maximum-pool-size=20
+spring.datasource.hikari.minimum-idle=5
+spring.datasource.hikari.idle-timeout=300000
+spring.datasource.hikari.max-lifetime=1800000
+spring.datasource.hikari.connection-timeout=30000
+spring.datasource.hikari.validation-timeout=5000
+
+
+spring.jpa.show-sql=true
+spring.jpa.properties.hibernate.format_sql=true
+
+logging.level.root=INFO
+logging.level.com.example.demo.service.ForecastSummaryService=DEBUG
 
 ```
 
@@ -273,6 +305,14 @@ kma.station=108
     - 다른 지역의 코드를 넣으면 해당 지점의 데이터 수집 가능
     - 119 수원 / 112 인천 / 143 강릉 / 156 대전
     - 159 부산 / 189 제주 / 185 여수 / 146 울릉도
+9. `HikariCP`
+    - 커넥션 풀 사이즈, idle/timeout 등 성능 튜닝 옵션 추가.
+    - DB URL/계정은 docker-compose.yml에서 환경변수로 주입하므로 application.properties에는 불필요.
+10. `JPA` 옵션
+    - SQL 로그 확인용 (show-sql, hibernate.format_sql).
+    - 운영에서는 꺼두는 걸 권장.
+11. `Logging`
+    - 전역은 INFO, 특정 서비스만 DEBUG 레벨.
 
 🔹 동작 원리
 - Spring Boot는 환경 변수 > properties 파일 순서로 값을 읽음
@@ -281,38 +321,53 @@ kma.station=108
 
 👉 모든 값은 환경 변수 우선 적용 후, 지정되지 않으면 application.properties의 기본값 사용
 
+🔹 보안 관련
+- InfluxDB Token, KMA API Key 등은 반드시 .env에 넣고 Git에 올리지 않음
+- CSRF, XSS 방어는 SecurityConfig + Spring Security 필터 체인에서 처리
 ---
 
 ### 4단계: 프로젝트 구조
 ```
 src/main/java/com/example/demo/
  ├── config/
- │    └── InfluxDBConfig.java               # InfluxDB 연결 설정
+ │    ├── InfluxDBConfig.java               # InfluxDB 연결 설정
+ │    ├── SecurityConfig.java          # Spring Security 설정
+ │    ├── RateLimitFilter.java         # 요청 제한 필터
+ │    └── ApiKeyRateLimitFilter.java        
  ├── constants/
- │    └── HttpStatusCodeContrants.java      # 상태 코드
+ │    └── HttpStatusCodeConstants.java      # 상태 코드
  ├── util/                                  # 유틸리티 (시간, 공통 함수)
- │    └── TimeUtils.java
+ │    ├── TimeUtils.java
+ │    └── LogMaskUtil.java      로그 마스킹
  ├── controller/                            # REST API 엔드포인트
- │    ├── ForecastSummaryController.java
- │    ├── KmaController.java                # KMA 데이터 수집 API
+ │    ├── ForecastSummaryController.java      # 단기예보 API
+ │    ├── KmaController.java                # 실시간 기상관측 API
  │    └── MeasurementController.java        # 센서 데이터 저장/조회 API
  ├── domain/                                # 도메인 엔티티 (관측 데이터)
+ │    ├── ApiKey.java
  │    ├── ForecastSummary.java
  │    ├── Sensor.java                       # 센서 엔티티
  │    └── SensorMeasurement.java            # 센서 측정값 엔티티
  ├── dto/                                   # 데이터 전송 객체
  │    ├── AdminResponse.java                # 공통 응답 Wrapper
  │    ├── SensorMeasurementRequest.java     # 요청 DTO (센서ID, 값)
- │    └── SensorMeasurementResponse.java    # 응답 DTO (센서ID, 값, 시각)
+ │    ├── SensorMeasurementResponse.java    # 응답 DTO (센서ID, 값, 시각)
+ │    └── ErrorResponse.java            # 공통 에러 응답 DTO
  ├── fixture/
  │    └── ServerInitializationFixture.java  # 서버 실행 시 기본 데이터 삽입
  ├── repository/                            # Repository 인터페이스
+ │    ├── ApiKeyRepository.java            
  │    ├── SensorRepository.java             # JPA 기반 Sensor Repository
  │    └── InfluxDBRepository.java           # InfluxDB 저장/조회 인터페이스
  ├── service/
- │    ├── ForecastSummaryService.java
- │    ├── KmaService.java                   # KMA API 호출 + InfluxDB 적재
- │    └── MeasurementService.java           # 센서 데이터 저장/조회 서비스
+ │    ├── ForecastSummaryService.java   # RDB 저장/조회, JSON 파싱
+ │    ├── KmaService.java                   # KMA API 호출 + InfluxDB 적재, Scheduled
+ │    └── MeasurementService.java           # InfluxDB 저장/조회
+ ├── exception/
+ │    ├── GlobalExceptionHandler.java   # 전역 예외 처리
+ │    ├── CustomException.java          # 사용자 정의 예외
+ │    └── ErrorCode.java                # 에러 코드 enum
+
  ├── DemoApplication.java                   # Spring Boot 실행 클래스
 
 src/main/kotlin/com/example/demo/repository/
@@ -384,19 +439,8 @@ docker-compose --env-file .env up -d --build
 
 **[다시 빌드 & 실행]**
 ```bash
-docker-compose down
-docker-compose --env-file .env up -d --build
-```
-
-**초기화가 필요할 때**
-```bash
 docker-compose down -v
-```
-
-**추가 확인 (볼륨 목록 보기)**
-```bash
-docker volume ls
-docker volume inspect mariadb_for_spring
+docker-compose --env-file .env up -d --build
 ```
 
 **[로그]**
@@ -642,42 +686,187 @@ public class SensorMeasurement {
 
 ---
 
-## 9. 확장 아이디어
-- 평균/최대/최소값 집계 API
-- Spring Boot Actuator + Grafana 대시보드
-- CI/CD (GitHub Actions, Jenkins 등)
-- 단기예보
-  - 기상청 단기예보 개황 API → Spring Boot → MariaDB 저장 → REST API로 공유
+## 9. 비기능 요구사항 (NFR)
+### 1) 보안 (Security)
+ - **환경 변수 기반 설정**
+    - DB 계정/비밀번호, KMA API Key는 .env 파일 또는 Docker 환경 변수로 관리
+    - application.properties에는 기본값만 정의 → 민감정보 노출 방지
+ - **입력값 검증**
+    - API 파라미터(tm1, tm2)는 정규식 검증 (\d{10,12}) 적용
+    - 잘못된 입력 시 400 Bad Request 반환
+ - **SQL Injection 방어**
+    - Spring Data JPA 파라미터 바인딩 사용 (`:param`) → 쿼리 문자열 직접 조합 금지
+ - **로그 마스킹 처리**
+    - 비밀번호, 토큰, 인증 키는 로그에 노출되지 않도록 별도 마스킹 로직 적용
+    - 일관된 패턴: log.info("...{}", LogMaskUtil.mask(variable));
+ - **외부 API 호출 보안**
+    - RestTemplate/WebClient 응답값 유효성 검증
+    - 예상치 못한 응답(JSON 파싱 오류, 필드 누락) 시 Graceful Fail 처리
+
+### 2) 안정성 (Reliability)
+ - **중복 방지**
+    - ForecastSummary 테이블 (tm_fc, stn_id)에 Unique Index 적용
+    - 중복 발생 시 Upsert(ON DUPLICATE KEY UPDATE) 처리
+ - **스케줄러 안정화**
+    - 서버 기동 시 초기 적재 수행 후 → 첫 번째 스케줄은 skip 처리
+    - 예외 발생 시 로깅 및 재시도 가능
+ - **시간 일관성**
+    - InfluxDB는 UTC 저장
+    - API 응답은 Asia/Seoul 변환 → 전 구간 일관성 유지
+
+### 3) 방어적 코딩 (Defensive Coding)
+ - Null 체크 및 기본값 처리
+    ```java
+    double ws = parseDouble(parts[3]); // 잘못된 값일 경우 NaN 반환
+    String manFc = node.hasNonNull("man_fc") ? node.get("man_fc").asText() : "unknown";
+    ```
+ - 예외 처리 강화
+    ```java
+    try {
+        JsonNode root = objectMapper.readTree(cleaned);
+    } catch (JsonProcessingException e) {
+        log.error("❌ JSON 파싱 오류", e);
+        return HttpStatusCodeConstants.FORCE_ERROR;
+    }
+    ```
+ - API 요청 파라미터 검증
+    ```java
+    @PostMapping("/forecast")
+    public AdminResponse<?> fetchForecast(
+        @RequestParam @Pattern(regexp="\\d{10,12}") String tmfc1,
+        @RequestParam @Pattern(regexp="\\d{10,12}") String tmfc2) {
+        ...
+    }
+    ```
+### 4) 테스트 (Test Code)
+ - 단위 테스트 (JUnit5 + Mockito)
+    - Repository Mocking → Service 레이어 검증
+ - 통합 테스트 (@SpringBootTest + TestContainers)
+    - MariaDB / InfluxDB 컨테이너 기반 테스트
+ - 예외 처리 시나리오 테스트
+    - API Key 누락 / 잘못된 시간 입력 / JSON 파싱 오류
+ - 성능 테스트
+    - JMeter/Gatling 기반 REST API 부하 테스트
+```java
+@SpringBootTest
+class ForecastSummaryServiceTest {
+    @Autowired ForecastSummaryService service;
+
+    @Test
+    void testFetchAndSave_InvalidResponse() {
+        int result = service.fetchAndSave("2025091106", "xxxx");
+        assertEquals(HttpStatusCodeConstants.FORCE_ERROR, result);
+    }
+}
+```
+
+---
+## 10. 로그/마스킹 일관성
+| 서비스                                                    | 민감 데이터     | 처리                                 |
+| ------------------------------------------------------ | ---------- | ---------------------------------- |
+| `KmaService`                                           | tm1/tm2    | `LogMaskUtil.mask()` 적용            |
+| `ForecastSummaryService` / `ForecastSummaryController` | tm1/tm2    | 마스킹 적용                             |
+| `MeasurementService` / `MeasurementController`         | sensorName | 마스킹 적용, sensorId는 그대로 → 필요 시 통일 가능 |
 
 ---
 
-## 10. 비기능 요구사항 (NFR)
-1. 보안 (Security)
-- 환경 변수 기반 설정
-  - DB 계정/비밀번호, KMA API Key는 .env 파일 또는 Docker 환경 변수로 관리
-  - application.properties에는 기본값만 정의 → 민감정보 노출 방지
-- 입력값 검증
-  - API 파라미터(tm1, tm2, tmfc1, tmfc2)는 정규식 검증 (\d{10,12}) 적용
-  - 잘못된 입력 시 400 Bad Request 반환
-- SQL Injection 방어
-  - Spring Data JPA 파라미터 바인딩 사용 (:param) → 쿼리 문자열 직접 조합 금지
-- 로그 마스킹 처리
-  - 비밀번호, 토큰, 인증 키는 로그에 노출되지 않도록 별도 마스킹 로직 적용
-- 외부 API 호출 보안
-  - RestTemplate/WebClient 응답값 유효성 검증
-  - 예상치 못한 응답(JSON 파싱 오류, 필드 누락) 시 Graceful Fail 처리
+## 11. 응답 코드
+### 1. HttpStatusCodeConstants
+ - 형식: 단순 int 상수 모음
+ - 용도: 서비스/비즈니스 로직 내부에서 “프로세스 결과 코드”로 사용
+ - 장점: 숫자만으로 간단하게 처리 가능
+    ```
+    int result = forecastService.fetchAndSave(tm1, tm2);
+    if (result == HttpStatusCodeConstants.OK) { ... }
+    ```
+ - 단점: HTTP 상태 코드와 혼동될 수 있음 / 메시지 없음 → 로깅/응답 시 별도 처리 필요
 
-2. 안정성 (Reliability)
-- 중복 방지
-  - ForecastSummary 테이블 (tm_fc, stn_id)에 Unique Index 적용
-  - 중복 발생 시 Upsert(ON DUPLICATE KEY UPDATE) 처리
-- 스케줄러 안정화
-  - 서버 기동 시 초기 적재 수행 후 → 첫 번째 스케줄은 skip 처리
-  - 예외 발생 시 로깅 및 재시도 가능
-- 시간 일관성
-  - InfluxDB는 UTC 저장, API 응답은 Asia/Seoul 변환 → 전 구간 일관성 유지
+### 2.  ErrorCode (enum)
+ - 형식: HttpStatus + 메시지를 가진 enum
+ - 용도: Controller → Response 처리 시 표준화된 오류 응답 제공
+ - 장점: HTTP 상태 + 메시지를 함께 제공 → 클라이언트 친화적   
+    Spring @ControllerAdvice에서 통합 Exception 처리 시 유용
+    ```
+    throw new CustomException(ErrorCode.INVALID_REQUEST);
 
-3. 방어적 코딩 (Defensive Coding)
-- Null 체크 및 기본값 처리
-- 예외 처리 강화
-- API 요청 파라미터 검증
+    // @ControllerAdvice에서
+    @ResponseStatus(code = errorCode.getStatus())
+    public ErrorResponse handle(CustomException e) {
+        return new ErrorResponse(e.getErrorCode().getMessage());
+    }
+    ```
+ - 단점: 서비스 내부에서 단순히 숫자 비교용으로는 불편 / 단순 카운트/로직용 상태코드에는 과도
+
+---
+
+ ## 12. 공통 문제점 / 개선 포인트
+1. @Slf4j 누락
+    - Controller / Service → 반드시 추가
+2. 마스킹 변수 사용 통일
+    - log.info("...{}", maskedVar) 패턴으로 통일
+3. 반환 타입 통일성
+    - `AdminResponse<?>` 또는` AdminResponse<List<T>>` 사용
+4. CompletableFuture 사용
+    - MeasurementService 그룹 조회에만 활용 → 다른 서비스에도 확장 가능
+5. 스케줄러 충돌 방지
+    - 초기 적재 스케줄과 정기 스케줄 분리
+6. Exception Handling
+    - 일부 Controller는 throws Exception, 일부는 내부 try/catch → 통일 가능
+
+---
+## 13. API KEY
+- API 요청 시 X-API-KEY 헤더를 사용해 인증
+- DB(api_keys)에 저장된 Key와 비교
+- Key 활성화 여부(active) 확인
+- 요청 횟수 제한(Rate Limit) 적용: 1분 기준 limitPerMinute
+- 유효하지 않거나 미입력 시 401 Unauthorized 응답
+- 제한 초과 시 429 Too Many Requests 응답
+
+- 예시 API KEY 등록
+```
+INSERT INTO api_keys (api_key, owner, limit_per_minute, active)
+VALUES ('demo-api-key-1234', 'system', 60, TRUE);
+```
+- Rate Limiting 필터
+    - Bucket4j 사용
+    - API Key별 Bucket 캐싱 → 요청 처리 시 즉시 사용 가능
+    - 초과 시 429 반환
+- `ServerInitializationFixture`에서 Sensor 등록과 비슷하게 API Key를 초기화
+
+- 포스트맨 테스트 가이드
+    1. API key 헤더 추가
+    ```
+    Key: X-API-KEY
+    Value: demo-api-key-1234
+    ```
+    2. 테스트 케이스
+    - 정상 요청: API Key 올바름 → 200 OK
+    - 미입력 요청: X-API-KEY 없음 → 401 Unauthorized
+    - 잘못된 Key: 존재하지 않거나 비활성 Key → 401 Unauthorized
+    - Rate Limit 초과: 1분에 60번 이상 요청 → 429 Too Many Requests
+    3. 자동 반복 요청
+    - 포스트맨 → Runner → 반복 횟수 70회 → 초과 시 429 확인 가능
+
+- 주의 사항
+    - API Key는 유출되지 않도록 환경 변수/Secrets 관리
+    - 테스트용 Key와 운영 Key는 분리
+    - Bucket 캐시는 서버 재시작 시 초기화 → 서버 재시작 시에도 초기 Key를 DB에서 로딩하도록 구현 추천
+---
+
+## 14. 확장 아이디어
+- 평균/최대/최소값 집계 API
+- Spring Boot Actuator + Grafana 대시보드
+- CI/CD (GitHub Actions, Jenkins 등)
+- 기상청 단기예보 개황 API → Spring Boot → MariaDB 저장 → REST API로 공유
+- 웹소켓 이벤트 핸들러
+- 로그인 기능 (WebSecurity)
+- 비기능 요구사항(보안/안정성)
+  - Spring Security + CSRF 방어, API Key Rate Limiting
+  - DB 커넥션 풀 설정 (HikariCP)
+  - ExceptionHandler 통합 (@ControllerAdvice)
+- 테스트 코드
+  - 단위 테스트(JUnit5, Mockito, Kotest)
+  - 통합 테스트(Testcontainers로 MariaDB/InfluxDB 띄우기)
+- 운영 모니터링
+  - Spring Boot Actuator → 헬스체크 + 메트릭 수집
+  - Grafana/Prometheus 연동

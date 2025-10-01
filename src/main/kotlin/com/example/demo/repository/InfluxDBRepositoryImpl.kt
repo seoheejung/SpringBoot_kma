@@ -9,9 +9,8 @@ import org.springframework.stereotype.Repository
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 
-
 @Repository
-class InfluxDBRepositoryImpl( influxDBClient: InfluxDBClient) : InfluxDBRepository {
+class InfluxDBRepositoryImpl(influxDBClient: InfluxDBClient) : InfluxDBRepository {
 
     private val writeApi: WriteApiBlocking = influxDBClient.writeApiBlocking
     private val queryApi: QueryApi = influxDBClient.queryApi
@@ -20,13 +19,13 @@ class InfluxDBRepositoryImpl( influxDBClient: InfluxDBClient) : InfluxDBReposito
         writeApi.writeMeasurement(WritePrecision.MS, measurement)
     }
 
-
     override fun findBySensorIdWithin(bucket: String, sensorName: String, durationSec: Long): List<SensorMeasurement> {
+        val safeSensorName = escapeForFlux(sensorName)
         val flux = """
             from(bucket: "$bucket")
             |> range(start: -${durationSec}s)
             |> filter(fn: (r) => r._measurement == "sensor_data")
-            |> filter(fn: (r) => r["sensor"] == "$sensorName")
+            |> filter(fn: (r) => r["sensor"] == "$safeSensorName")
             |> filter(fn: (r) => r._field == "value")
             |> timeShift(duration: 9h)
         """.trimIndent()
@@ -50,6 +49,7 @@ class InfluxDBRepositoryImpl( influxDBClient: InfluxDBClient) : InfluxDBReposito
      * ✅ 기간별 조회 (start ~ end)
      */
     override fun findBySensorIdBetween(bucket: String, sensorName: String, start: Instant, end: Instant): List<SensorMeasurement> {
+        val safeSensorName = escapeForFlux(sensorName)
         val startStr = DateTimeFormatter.ISO_INSTANT.format(start)
         val endStr = DateTimeFormatter.ISO_INSTANT.format(end)
 
@@ -57,11 +57,21 @@ class InfluxDBRepositoryImpl( influxDBClient: InfluxDBClient) : InfluxDBReposito
             from(bucket: "$bucket")
             |> range(start: $startStr, stop: $endStr)
             |> filter(fn: (r) => r._measurement == "sensor_data")
-            |> filter(fn: (r) => r["sensor"] == "$sensorName")
+            |> filter(fn: (r) => r["sensor"] == "$safeSensorName")
             |> filter(fn: (r) => r._field == "value")
             |> timeShift(duration: 9h)
         """.trimIndent()
 
         return queryApi.query(flux, SensorMeasurement::class.java)
+    }
+
+    /**
+     * ⚠️ Flux Injection 방어: 따옴표/백슬래시 등 이스케이프 처리
+     */
+    private fun escapeForFlux(input: String): String {
+        return input
+            .replace("\\", "\\\\")  // 백슬래시 → 이스케이프
+            .replace("\"", "\\\"")  // 큰따옴표 → \"
+            .replace("'", "\\'")    // 작은따옴표 → \'
     }
 }

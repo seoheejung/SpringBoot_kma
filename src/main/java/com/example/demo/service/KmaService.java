@@ -17,10 +17,11 @@ import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 
 import static com.example.demo.util.TimeUtils.*;
+import com.example.demo.util.LogMaskUtil;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
-@Slf4j
 public class KmaService {
 
     private final InfluxDBClient influxDBClient;
@@ -60,10 +61,21 @@ public class KmaService {
     public int fetchAndStore(String tm1, String tm2) {
         int savedCount = 0;
 
+        // 🔒 로그용 마스킹
+        String maskedStation = LogMaskUtil.mask(station);
+        String maskedAuthKey = LogMaskUtil.mask(authKey, 4);
+
+        log.info("KMA API 호출 시작: tm1={}, tm2={}, station={}, authKey={}",
+                tm1, tm2, maskedStation, maskedAuthKey);
+
+        // ✅ 실제 호출에는 원본 값 사용
         String url = String.format("%s?stn=%s&tm1=%s&tm2=%s&authKey=%s",
                 baseUrl, station, tm1, tm2, authKey);
 
-        log.info("🌐 KMA API 호출: {}", url);
+        // 🔒 로그용 URL 출력
+        log.info("🌐 KMA API 호출 URL: {}",
+                String.format("%s?stn=%s&tm1=%s&tm2=%s&authKey=%s",
+                        baseUrl, maskedStation, tm1, tm2, maskedAuthKey));
 
         String response = WebClient.create()
                 .get().uri(url)
@@ -71,8 +83,9 @@ public class KmaService {
                 .bodyToMono(String.class)
                 .block();
 
+
         if (response == null || response.isBlank()) {
-            log.warn("⚠️ KMA API 응답이 비어있음");
+            log.warn("⚠️ KMA API 응답이 비어있음 (station={})", maskedStation);
             return savedCount;
         }
 
@@ -103,10 +116,10 @@ public class KmaService {
                         makePoint("rainfall", stn, rn, time)
                 ));
                 savedCount++;
-                log.info("✅ KMA 데이터 저장: time={} temp={}", time, ta);
+                log.info("✅ KMA 데이터 저장: time={} temp={} station={}", time, ta, stn);
             } catch (Exception e) {
                 log.error("❌ 데이터 파싱 오류: {}", line, e);
-            } 
+            }
         }
 
         return savedCount;

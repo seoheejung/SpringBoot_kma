@@ -1,6 +1,6 @@
 package com.example.demo.service;
 
-import com.example.demo.constants.HttpStatusCodeContrants;
+import com.example.demo.constants.HttpStatusCodeConstants;
 import com.example.demo.domain.ForecastSummary;
 import com.example.demo.repository.ForecastSummaryRepository;
 import com.fasterxml.jackson.core.JsonParser;
@@ -17,10 +17,11 @@ import org.springframework.web.client.RestTemplate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import static com.example.demo.util.TimeUtils.*;
+import com.example.demo.util.LogMaskUtil;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
-@Slf4j
 public class ForecastSummaryService {
 
     private final ForecastSummaryRepository repository;
@@ -56,20 +57,31 @@ public class ForecastSummaryService {
      * 기상청 단기예보 개황 데이터 조회 + 저장
      */
     @Transactional
-    public int fetchAndSave(String tmfc1, String tmfc2) {
+    public int fetchAndSave(String tmf1, String tmf2) {
+        // 🔐 로그용 마스킹
+        String maskedStation = LogMaskUtil.mask(station);
+        String maskedAuthKey = LogMaskUtil.mask(authKey);
+
+        // ✅ 실제 API 호출용 URL (마스킹 X)
         String url = String.format(
-            "%s?stn=%s&tmfc1=%s&tmfc2=%s&disp=1&authKey=%s",
-            fctUrl, station, tmfc1, tmfc2, authKey
+                "%s?stn=%s&tmf1=%s&tmf2=%s&disp=1&authKey=%s",
+                fctUrl, station, tmf1, tmf2, authKey
         );
-        log.info("🌐 KMA API 호출: {}", url);
+
+        // ✅ 로그 출력용 URL (마스킹)
+        String logUrl = String.format(
+                "%s?stn=%s&tmf1=%s&tmf2=%s&disp=1&authKey=%s",
+                fctUrl, maskedStation, tmf1, tmf2, maskedAuthKey
+        );
+
+        log.info("🌐 KMA API 호출: {}", logUrl);
 
         try {
             String response = restTemplate.getForObject(url, String.class);
             if (response == null || response.isBlank()) {
-                return HttpStatusCodeContrants.FORCE_ERROR;
+                log.warn("⚠️ KMA API 응답이 비어있음 (station={})", maskedStation);
+                return HttpStatusCodeConstants.FORCE_ERROR;
             }
-
-            // log.debug("🔍 응답 데이터 (앞부분): {}", response.substring(0, Math.min(300, response.length())));
 
             // ✅ #START7777, #7777END 제거
             String cleaned = response
@@ -77,13 +89,12 @@ public class ForecastSummaryService {
                     .replaceAll("#7777END", "")
                     .trim();
 
-            // log.debug("🧹 정리된 응답 (앞부분): {}", cleaned.substring(0, Math.min(300, cleaned.length())));
-
             // ✅ JSON 파싱
             JsonNode root = objectMapper.readTree(cleaned);
             JsonNode dataArray = root.get("fct_afs_ds");
             if (dataArray == null || !dataArray.isArray() || dataArray.isEmpty()) {
-                return HttpStatusCodeContrants.NON_AUTHORITATIVE_INFO;
+                log.warn("⚠️ JSON 배열 데이터 없음 (station={})", maskedStation);
+                return HttpStatusCodeConstants.NON_AUTHORITATIVE_INFO;
             }
 
             DateTimeFormatter jsonFmt = DateTimeFormatter.ofPattern("yyyy.MM.dd.HH:mm");
@@ -107,12 +118,11 @@ public class ForecastSummaryService {
                 repository.upsert(summary);
                 count++;
             }
-            log.info("✅ JSON 형식 {}건 저장 완료", count);
-
-            return HttpStatusCodeContrants.OK;
+            log.info("✅ JSON 형식 {}건 저장 완료 (station={})", count, maskedStation);
+            return HttpStatusCodeConstants.OK;
         } catch (Exception e) {
-            log.error("❌ KMA 단기예보 개황 데이터 처리 오류", e);
-            return HttpStatusCodeContrants.FORCE_ERROR;
+            log.error("❌ KMA 단기예보 개황 데이터 처리 오류 (station={})", maskedStation, e);
+            return HttpStatusCodeConstants.FORCE_ERROR;
         }
     }
 

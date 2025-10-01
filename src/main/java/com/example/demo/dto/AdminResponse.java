@@ -2,7 +2,7 @@ package com.example.demo.dto;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.example.demo.constants.HttpStatusCodeContrants;
+import com.example.demo.constants.HttpStatusCodeConstants;
 import lombok.Builder;
 import lombok.Data;
 
@@ -11,7 +11,7 @@ import lombok.Data;
 public class AdminResponse<T> {
 
     @Builder.Default
-    private int status = HttpStatusCodeContrants.OK;
+    private int status = HttpStatusCodeConstants.OK;
     private T payload;
 
     public String toJson() {
@@ -27,7 +27,7 @@ public class AdminResponse<T> {
     // ✅ 헬퍼 메서드 (코드 가독성 ↑)
     public static <T> AdminResponse<T> ok(T payload) {
         return AdminResponse.<T>builder()
-                .status(HttpStatusCodeContrants.OK)
+                .status(HttpStatusCodeConstants.OK)
                 .payload(payload)
                 .build();
     }

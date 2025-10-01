@@ -19,24 +19,26 @@ interface ForecastSummaryRepository : JpaRepository<ForecastSummary, Long> {
     ): List<ForecastSummary>
 
     /**
-     * Upsert (중복: tm_fc + stn_id)
-     * MariaDB의 ON DUPLICATE KEY UPDATE 활용
+     * ✅ Upsert (tm_fc + stn_id 기준)
+     * - @Param + Named Parameter 사용
+     * - Native Query 그대로 두되, 안전한 바인딩 보장
      */
     @Modifying
     @Query("""
         INSERT INTO forecast_summary (
             tm_fc, stn_id, man_fc, wf_sv1, wf_sv2, wf_sv3, wn, wr, rem
-        ) VALUES (
-            :#{#fs.tmFc}, :#{#fs.stnId}, :#{#fs.manFc}, :#{#fs.wfSv1}, :#{#fs.wfSv2}, :#{#fs.wfSv3}, :#{#fs.wn}, :#{#fs.wr}, :#{#fs.rem}
-        )
-        ON DUPLICATE KEY UPDATE
-            man_fc = VALUES(man_fc),
-            wf_sv1 = VALUES(wf_sv1),
-            wf_sv2 = VALUES(wf_sv2),
-            wf_sv3 = VALUES(wf_sv3),
-            wn = VALUES(wn),
-            wr = VALUES(wr),
-            rem = VALUES(rem)
+            ) VALUES (
+                :#{#fs.tmFc}, :#{#fs.stnId}, :#{#fs.manFc}, :#{#fs.wfSv1}, 
+                :#{#fs.wfSv2}, :#{#fs.wfSv3}, :#{#fs.wn}, :#{#fs.wr}, :#{#fs.rem}
+            )
+            ON DUPLICATE KEY UPDATE
+                man_fc = VALUES(man_fc),
+                wf_sv1 = VALUES(wf_sv1),
+                wf_sv2 = VALUES(wf_sv2),
+                wf_sv3 = VALUES(wf_sv3),
+                wn = VALUES(wn),
+                wr = VALUES(wr),
+                rem = VALUES(rem)
     """, nativeQuery = true)
     fun upsert(@Param("fs") fs: ForecastSummary)
 
